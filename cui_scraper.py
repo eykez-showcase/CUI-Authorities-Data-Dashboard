@@ -81,6 +81,9 @@ driver.quit()
 df = pd.DataFrame(data)
 print(f"📊 Total rows scraped: {len(df)}")
 
+print(df.head())
+df.to_csv("data/debug_dump.csv", index=False)
+
 excel_path = "data/cui_authorities_full.xlsx"
 with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
     df.to_excel(writer, index=False, sheet_name="CUI Authorities")
