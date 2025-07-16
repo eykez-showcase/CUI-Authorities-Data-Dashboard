@@ -1,72 +1,76 @@
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 import pandas as pd
+import time
+from urllib.parse import urljoin
+
+# --- Setup Selenium ---
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+driver = webdriver.Chrome(options=chrome_options)
 
 base_url = "https://www.archives.gov"
-category_list_url = f"{base_url}/cui/registry/category-list"
+main_url = "https://www.archives.gov/cui/registry/category-list"
+driver.get(main_url)
+time.sleep(2)
 
-print("📥 Scraping category list...")
-r = requests.get(category_list_url)
-soup = BeautifulSoup(r.text, "html.parser")
+# --- Parse Main Table ---
+soup = BeautifulSoup(driver.page_source, 'html.parser')
+table = soup.find('table', id='fd-table-1')
+rows = table.find('tbody').find_all('tr')
 
-categories = []
-all_elements = soup.select("h3, ul")
-
-for i in range(len(all_elements)):
-    if all_elements[i].name == "h3":
-        org = all_elements[i].get_text(strip=True)
-        if i + 1 < len(all_elements) and all_elements[i+1].name == "ul":
-            for li in all_elements[i+1].find_all("li"):
-                a_tag = li.find("a")
-                if a_tag:
-                    name = a_tag.text.strip()
-                    url = base_url + a_tag["href"]
-                    categories.append((name, url, org))
-
-print(f"✅ Found {len(categories)} categories.")
-
-# Now scrape each category's page
 data = []
-for name, url, org in categories:
-    print(f"🔍 Scraping: {name}")
-    try:
-        r = requests.get(url)
-        soup = BeautifulSoup(r.text, "html.parser")
-        tables = soup.select("table")
 
+for row in rows:
+    tds = row.find_all('td')
+    if len(tds) < 2:
+        continue
+    org_index = tds[0].get_text(strip=True)
+    for li in tds[1].find_all('li'):
+        a = li.find('a')
+        if not a:
+            continue
+        cui_name = a.get_text(strip=True)
+        cui_link = urljoin(base_url, a['href'])
+
+        # Visit detail page
+        driver.get(cui_link)
+        time.sleep(1.5)
+        detail_soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+        # Extract authorities from tables
+        tables = detail_soup.find_all("table")
         for table in tables:
-            for row in table.select("tr")[1:]:
-                cols = row.find_all("td")
-                if len(cols) >= 4:
-                    authority = cols[0].text.strip()
-                    basic_specified = cols[1].text.strip()
-                    safeguarding = cols[2].text.strip()
-                    sanctions = cols[3].text.strip()
+            for tr in table.find_all("tr")[1:]:  # skip header
+                tds_inner = tr.find_all("td")
+                if len(tds_inner) >= 4:
+                    authority = tds_inner[0].get_text(strip=True)
+                    basic_specified = tds_inner[1].get_text(strip=True)
+                    safeguarding = tds_inner[2].get_text(strip=True)
+                    sanctions = tds_inner[3].get_text(strip=True)
 
                     data.append({
                         "Safeguarding and/or Dissemination Authority": safeguarding,
-                        "Organizational Category": org,
+                        "Organizational Category": org_index,
                         "Authority": authority,
                         "Basic/Specified": basic_specified,
-                        "Category": name,
-                        "Sanctions": sanctions
+                        "Category": cui_name,
+                        "Sanctions": sanctions,
+                        "Detail Page": cui_link
                     })
-    except Exception as e:
-        print(f"⚠️ Failed to scrape {name}: {e}")
 
+driver.quit()
+
+# --- Save to Excel ---
 df = pd.DataFrame(data)
-print(f"📊 Total rows scraped: {len(df)}")
-
-# Save to Excel
-excel_file = "CUI_Authorities.xlsx"
-with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
+excel_path = "data/cui_authorities_full.xlsx"
+with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
     df.to_excel(writer, index=False, sheet_name="CUI Authorities")
+    df.groupby("Category").size().reset_index(name="Source Count") \
+        .to_excel(writer, sheet_name="Sources Per Category", index=False)
+    df[df["Sanctions"] != ""].groupby("Category").size().reset_index(name="Sanction Count") \
+        .to_excel(writer, sheet_name="Sanctions Per Category", index=False)
+    pd.DataFrame([{"Total Sources": len(df)}]).to_excel(writer, sheet_name="Metadata", index=False)
 
-    if not df.empty:
-        df.groupby("Category").size().reset_index(name="Source Count").to_excel(writer, sheet_name="Sources Per Category", index=False)
-        df[df["Sanctions"] != ""].groupby("Category").size().reset_index(name="Sanction Count").to_excel(writer, sheet_name="Sanctions Per Category", index=False)
-        pd.DataFrame([{"Total Sources": len(df)}]).to_excel(writer, sheet_name="Metadata", index=False)
-    else:
-        pd.DataFrame([{"Error": "No data scraped"}]).to_excel(writer, sheet_name="Metadata", index=False)
-
-print(f"💾 Done! Saved to {excel_file}")
+print(f"✅ Full scrape complete. Excel saved to {excel_path}")
