@@ -1,12 +1,22 @@
 import os
 import time
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.core.utils import ChromeType
+
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+
+# 🔥 SSL VERIFY OFF (dangerous in prod, okay for corp VPN scraping)
+os.environ['WDM_SSL_VERIFY'] = '0'
+
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
 # --- Setup ---
 os.makedirs("data", exist_ok=True)
