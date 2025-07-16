@@ -12,18 +12,21 @@ soup = BeautifulSoup(r.text, "html.parser")
 categories = []
 current_org = ""
 
-for block in soup.select(".field-content"):
-    if block.find("h3"):
-        current_org = block.text.strip()
-    elif block.find("a"):
-        a = block.find("a")
-        name = a.text.strip()
-        url = base_url + a["href"]
-        categories.append((name, url, current_org))
+# Loop through content under #block-cui-content (reliable container)
+content = soup.select_one("#block-cui-content")
+for el in content.find_all(["h3", "li"]):
+    if el.name == "h3":
+        current_org = el.get_text(strip=True)
+    elif el.name == "li":
+        a_tag = el.find("a")
+        if a_tag:
+            name = a_tag.get_text(strip=True)
+            url = base_url + a_tag["href"]
+            categories.append((name, url, current_org))
 
 print(f"✅ Found {len(categories)} categories.")
 
-# Scrape detail data
+# Now scrape details from each category
 data = []
 for name, url, org in categories:
     print(f"🔍 Scraping: {name}")
@@ -33,7 +36,7 @@ for name, url, org in categories:
         tables = soup.select("table")
 
         for table in tables:
-            for row in table.select("tr")[1:]:  # Skip header
+            for row in table.select("tr")[1:]:
                 cols = row.find_all("td")
                 if len(cols) >= 4:
                     authority = cols[0].text.strip()
@@ -52,12 +55,10 @@ for name, url, org in categories:
     except Exception as e:
         print(f"⚠️ Failed to scrape {name}: {e}")
 
-# Convert to DataFrame
+# Convert and save
 df = pd.DataFrame(data)
-
 print(f"📊 Total rows scraped: {len(df)}")
 
-# Save to Excel
 excel_file = "CUI_Authorities.xlsx"
 with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
     df.to_excel(writer, index=False, sheet_name="CUI Authorities")
