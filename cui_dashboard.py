@@ -89,4 +89,4 @@ def update_display(selected_categories, selected_orgs):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True)
