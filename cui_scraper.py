@@ -85,13 +85,35 @@ for i, (org, name, url) in enumerate(categories):
 
 driver.quit()
 
-# --- Save to Excel ---
 df = pd.DataFrame(data)
 print(f"📊 Total rows scraped: {len(df)}")
 
+# --- Clean up and expand sanctions ---
+import re
+
+# Rename 'Authority' column to 'Authority and Sanctions'
+df.rename(columns={"Authority": "Authority and Sanctions"}, inplace=True)
+
+# Split sanctions into separate columns
+def split_sanctions(s):
+    if pd.isna(s) or s.strip() == "":
+        return []
+    return re.split(r"[;\n]", s)
+
+split_cols = df["Sanctions"].apply(split_sanctions)
+max_sanctions = split_cols.map(len).max()
+
+# Create new columns: Sanction 1, Sanction 2, ...
+for i in range(max_sanctions):
+    df[f"Sanction {i+1}"] = split_cols.apply(lambda x: x[i].strip() if i < len(x) else "")
+
+df.drop(columns=["Sanctions"], inplace=True)
+
+# Debug dump
 print(df.head())
 df.to_csv("data/debug_dump.csv", index=False)
 
+# --- Save to Excel ---
 excel_path = "data/cui_authorities_full.xlsx"
 with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
     df.to_excel(writer, index=False, sheet_name="CUI Authorities")
@@ -99,10 +121,16 @@ with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
     if not df.empty:
         df.groupby("Category").size().reset_index(name="Source Count") \
             .to_excel(writer, sheet_name="Sources Per Category", index=False)
-        df[df["Sanctions"] != ""].groupby("Category").size().reset_index(name="Sanction Count") \
+
+        sanction_cols = [col for col in df.columns if col.startswith("Sanction")]
+        df_sanctioned = df[df[sanction_cols].apply(lambda row: any(cell.strip() != "" for cell in row), axis=1)]
+        df_sanctioned.groupby("Category").size().reset_index(name="Sanction Count") \
             .to_excel(writer, sheet_name="Sanctions Per Category", index=False)
+
         pd.DataFrame([{"Total Sources": len(df)}]).to_excel(writer, sheet_name="Metadata", index=False)
     else:
         pd.DataFrame([{"Error": "No data scraped"}]).to_excel(writer, sheet_name="Metadata", index=False)
 
 print(f"✅ Full scrape complete. Excel saved to {excel_path}")
+
+
